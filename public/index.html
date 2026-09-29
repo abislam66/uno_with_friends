@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1a0b3d">
+  <title>UNO Party</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='18' y='6' width='64' height='88' rx='10' fill='%23f5334f' stroke='white' stroke-width='6'/><ellipse cx='50' cy='50' rx='22' ry='36' fill='white' transform='rotate(30 50 50)'/><text x='50' y='64' font-size='40' font-family='Arial' font-weight='900' text-anchor='middle' fill='%23f5334f'>U</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ============ HOME ============ -->
+  <main id="home" class="screen">
+    <div class="floaters" id="floaters" aria-hidden="true"></div>
+    <div class="panel home-panel">
+      <div class="logo" aria-label="UNO Party">
+        <span class="logo-oval"><b>UNO</b></span>
+        <span class="logo-party">PARTY</span>
+      </div>
+      <p class="tagline">Play UNO with your friends in the browser. No sign-up needed.</p>
+
+      <label class="field">
+        <span class="label">Your name</span>
+        <input id="name" maxlength="16" placeholder="Type your name" autocomplete="nickname">
+      </label>
+
+      <div class="field">
+        <span class="label">Pick your avatar</span>
+        <div id="avatars" class="avatars" role="radiogroup" aria-label="Avatar"></div>
+      </div>
+
+      <button id="create" class="btn big primary">🎉 Create a room</button>
+      <div class="or"><span>or join your friends</span></div>
+      <div class="join-row">
+        <input id="code" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" aria-label="Room code">
+        <button id="join" class="btn big secondary">Join</button>
+      </div>
+      <p id="home-error" class="error" role="alert"></p>
+
+      <details class="how">
+        <summary>How to play</summary>
+        <ul>
+          <li>Match the top card by <b>color</b>, <b>number</b> or <b>symbol</b>. Wild cards go on anything.</li>
+          <li>No card to play? The game <b>draws one for you</b>. If it matches, you can play it.</li>
+          <li><b>Skip</b> skips the next player. <b>Reverse</b> changes direction. <b>+2</b> and <b>+4</b> make the next player draw.</li>
+          <li><b>Stacking:</b> if someone hits you with +2, play your own +2 to pass it on. The next player takes all 4!</li>
+          <li>Down to 2 cards? Hit <b>UNO!</b> before you play. Forget, and others can <b>catch</b> you for +2 cards.</li>
+          <li>Watch the timer. If it runs out, you draw a card and your turn ends.</li>
+          <li>First to empty their hand wins the round and scores points from everyone else's cards.</li>
+        </ul>
+      </details>
+    </div>
+  </main>
+
+  <!-- ============ LOBBY ============ -->
+  <main id="lobby" class="screen hidden">
+    <div class="panel lobby-panel">
+      <div class="lobby-head">
+        <div>
+          <span class="label">Room code</span>
+          <div id="lobby-code" class="big-code">----</div>
+        </div>
+        <button id="copy-link" class="btn">🔗 Copy invite link</button>
+      </div>
+      <p id="share-hint" class="hint"></p>
+
+      <h2>Players <span id="player-count" class="muted"></span></h2>
+      <ul id="lobby-players" class="lobby-players"></ul>
+
+      <div id="host-controls">
+        <button id="add-bot" class="btn">🤖 Add a computer player</button>
+        <div class="rules">
+          <label class="toggle">
+            <input type="checkbox" id="rule-stack">
+            <span class="switch" aria-hidden="true"></span>
+            <span><b>Stack +2 and +4</b><br><small>+2 on a +2 means the next player takes 4</small></span>
+          </label>
+          <label class="timer-pick">
+            <span><b>Turn timer</b><br><small>Time runs out = draw a card, turn ends</small></span>
+            <select id="rule-timer">
+              <option value="0">Off</option>
+              <option value="10">10 sec</option>
+              <option value="15">15 sec</option>
+              <option value="20">20 sec</option>
+              <option value="30">30 sec</option>
+            </select>
+          </label>
+        </div>
+        <button id="start" class="btn big primary">▶ Start game</button>
+      </div>
+      <div id="guest-info" class="guest-info"></div>
+      <button id="leave-lobby" class="btn ghost">Leave room</button>
+    </div>
+  </main>
+
+  <!-- ============ GAME ============ -->
+  <main id="game" class="screen hidden">
+    <header class="topbar">
+      <span class="chip">Room <b id="g-code"></b></span>
+      <span class="chip" id="g-round"></span>
+      <span class="chip color-chip" id="g-color"></span>
+      <span class="spacer"></span>
+      <div class="react-wrap">
+        <button id="react-btn" class="icon-btn" aria-label="Send a reaction" aria-expanded="false">😀</button>
+        <div id="react-pop" class="react-pop hidden"></div>
+      </div>
+      <button id="mute" class="icon-btn" aria-label="Turn sound off">🔊</button>
+      <button id="leave-game" class="icon-btn" aria-label="Leave game">🚪</button>
+    </header>
+
+    <section class="table" id="table">
+      <div class="felt"></div>
+      <div id="seats"></div>
+      <div class="center">
+        <svg class="dir-ring" id="dir-ring" viewBox="0 0 200 200" aria-hidden="true">
+          <g class="spin">
+            <circle cx="100" cy="100" r="92" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="10 12" opacity=".55"/>
+            <path d="M100 2 l12 6 -12 6z" fill="currentColor"/>
+            <path d="M100 198 l-12 -6 12 -6z" fill="currentColor"/>
+            <path d="M2 100 l6 -12 6 12z" fill="currentColor"/>
+            <path d="M198 100 l-6 12 -6 -12z" fill="currentColor"/>
+          </g>
+        </svg>
+        <button id="deck" class="pile deck" aria-label="Draw a card">
+          <span class="stack"></span>
+          <span class="deck-label" id="deck-label">Draw</span>
+        </button>
+        <div class="pile discard-wrap">
+          <div id="discard" class="discard"></div>
+          <span class="deck-label" id="discard-label"></span>
+        </div>
+      </div>
+      <div id="banner" class="banner" role="status" aria-live="polite"></div>
+      <div id="splash" class="splash" aria-hidden="true"></div>
+    </section>
+
+    <section class="me" id="me">
+      <div class="me-bar">
+        <div class="me-id">
+          <span class="avatar" id="me-avatar"></span>
+          <span><b id="me-name"></b><small id="me-score"></small></span>
+        </div>
+        <div class="meter" id="meter" aria-hidden="true">
+          <div class="meter-fill" id="meter-fill"></div>
+          <span class="meter-text" id="meter-text"></span>
+        </div>
+        <div class="me-actions">
+          <button id="pass" class="btn pass-btn hidden">Keep it &amp; pass</button>
+          <button id="uno-btn" class="uno-btn" disabled>UNO!</button>
+        </div>
+      </div>
+      <div class="hand-scroll" id="hand-scroll">
+        <div class="hand" id="hand"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ OVERLAYS ============ -->
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <div id="color-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="color-title">
+    <div class="modal-card">
+      <h2 id="color-title">Pick a color</h2>
+      <div class="color-grid">
+        <button class="color-choice red" data-color="red">Red</button>
+        <button class="color-choice yellow" data-color="yellow">Yellow</button>
+        <button class="color-choice green" data-color="green">Green</button>
+        <button class="color-choice blue" data-color="blue">Blue</button>
+      </div>
+      <button class="btn ghost" id="color-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <div id="result-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="result-title">
+    <div class="modal-card result-card">
+      <div class="trophy" id="result-avatar"></div>
+      <h2 id="result-title"></h2>
+      <p id="result-points" class="result-points"></p>
+      <ol id="scoreboard" class="scoreboard"></ol>
+      <div id="result-actions" class="result-actions"></div>
+    </div>
+  </div>
+
+  <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
+  <script src="app.js"></script>
+</body>
+</html>
