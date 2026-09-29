@@ -1,7 +1,7 @@
 'use strict';
 // Rule checks + hundreds of simulated bot games. Run: npm test
 const assert = require('assert');
-const { Room, LOBBY_DROP_MS, STAND_IN_MS } = require('./uno');
+const { Room, LOBBY_DROP_MS, STAND_IN_MS, GAME_TARGETS } = require('./uno');
 
 let passed = 0;
 function test(name, fn) {
@@ -176,6 +176,58 @@ test('winning adds up the points left in other hands', () => {
   assert.strictEqual(r.status, 'roundOver');
   assert.strictEqual(r.result.points, 7 + 50 + 20);
   assert.strictEqual(a.score, 77);
+});
+
+console.log('\nGame length');
+
+// Start a game the way the host does, with n people.
+function hosted(n, settings = {}) {
+  const r = new Room('TEST');
+  for (let i = 0; i < n; i++) r.addPlayer({ name: 'P' + i, avatar: '😎' });
+  Object.assign(r.settings, settings);
+  assert.strictEqual(r.act(r.players[0], { type: 'start' }), null);
+  return r;
+}
+// Make player i win the current round by playing their last card.
+function winRound(r, i) {
+  const p = r.players[i];
+  p.calledUno = true;
+  setup(r, i, [card('red', '1')], card('red', '5'));
+  for (const q of r.players) if (q !== p) q.hand = [card('blue', '9')];
+  assert.strictEqual(r.play(p, p.hand[0].id), null);
+}
+
+test('the points goal grows with the number of players', () => {
+  for (let n = 3; n <= 8; n++) assert.ok(GAME_TARGETS[n] > GAME_TARGETS[n - 1], `${n} players`);
+  assert.strictEqual(hosted(2).target, GAME_TARGETS[2]);
+  assert.strictEqual(hosted(5).target, GAME_TARGETS[5]);
+});
+
+test('reaching the goal wins the game; "New game" resets the scores', () => {
+  const r = hosted(2);
+  r.players[0].score = r.target - 5;
+  winRound(r, 0);
+  assert.ok(r.result.gameOver, 'game over');
+  assert.strictEqual(r.act(r.players[0], { type: 'next' }), null);
+  assert.strictEqual(r.round, 1);
+  assert.ok(r.players.every(p => p.score === 0));
+});
+
+test('a round win below the goal keeps the game going', () => {
+  const r = hosted(3);
+  winRound(r, 1);
+  assert.ok(!r.result.gameOver);
+  r.act(r.players[0], { type: 'next' });
+  assert.strictEqual(r.round, 2);
+  assert.strictEqual(r.players[1].score, 9 * 2, 'score kept');
+});
+
+test('"No limit" never ends the game', () => {
+  const r = hosted(2, { endless: true });
+  assert.strictEqual(r.target, null);
+  r.players[0].score = 10000;
+  winRound(r, 0);
+  assert.ok(!r.result.gameOver);
 });
 
 console.log('\nLeaving and coming back');

@@ -98,6 +98,13 @@
               <option value="30">30 sec</option>
             </select>
           </label>
+          <label class="timer-pick">
+            <span><b>Game length</b><br><small id="length-hint"></small></span>
+            <select id="rule-length">
+              <option value="goal">Play to a score</option>
+              <option value="endless">No limit</option>
+            </select>
+          </label>
         </div>
         <button id="start" class="btn big primary">▶ Start game</button>
       </div>
@@ -111,6 +118,7 @@
     <header class="topbar">
       <span class="chip">Room <b id="g-code"></b></span>
       <span class="chip" id="g-round"></span>
+      <span class="chip" id="g-goal"></span>
       <span class="chip color-chip" id="g-color"></span>
       <span class="spacer"></span>
       <div class="react-wrap">

@@ -55,6 +55,14 @@ School and office Wi-Fi often blocks devices from talking to each other. If frie
 - **Skip** skips the next player. **Reverse** changes direction (with 2 players it works like Skip).
 - Down to 2 cards? Press **UNO!** (or the `U` key) before you play. Forget, and everyone else gets 4 seconds to press **Catch!**. You then draw 2.
 - First to empty their hand wins the round and scores the points left in everyone else's hand (numbers = face value, action cards = 20, wilds = 50).
+- **First to the points goal wins the game.** The goal depends on how many are playing, so a game lasts about as long whatever the group size (the host can pick **No limit** instead):
+
+  | Players | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | First to | 100 | 180 | 245 | 310 | 375 | 445 | 520 |
+  | Average game | ~13 min | ~17 min | ~21 min | ~25 min | ~29 min | ~33 min | ~37 min |
+
+  That's about 10–15 minutes for 2 players, plus about 4 minutes for each extra player. Single games vary a lot: a 2-player game can end in 3 minutes or run 25.
 - Send emoji reactions with the 😀 button. Press `D` to draw.
 
 ## Files
@@ -65,5 +73,8 @@ School and office Wi-Fi often blocks devices from talking to each other. If frie
 | `server.js` | Web server, rooms, live updates, turn timers, automatic draws, bots |
 | `public/` | The game screens (`index.html`, `style.css`, `app.js`) |
 | `test.js` | Rule checks + 500 simulated games (`npm test`) |
+| `simulate.js` | Times thousands of full games to check game length (`npm run simulate`; try `-- --think 8` for slower players) |
+
+The game-length numbers come from `npm run simulate`. It plays full games with computer players and times each turn the way the app runs: people take about 5 seconds to choose a card (a guess, not a measurement), the game draws for you after 1.4 seconds, and there are 12 seconds between rounds. If your group plays faster or slower, games will be shorter or longer.
 
 Games live in the server's memory. Restarting the server ends all rooms (saved seats then just stop showing up).

@@ -10,6 +10,14 @@ const UNO_WINDOW_MS = 4000;          // how long others can "Catch!" someone who
 const LOBBY_DROP_MS = 30000;         // in the lobby, players who close the tab are removed after this
 const STAND_IN_MS = 60000;           // in a game, a computer plays for anyone gone this long (until they rejoin)
 const TIMER_CHOICES = [0, 10, 15, 20, 30];
+// First to this many points wins the game. Chosen with simulate.js so an average game lasts
+// 10-15 min with 2 players, and each extra player adds 3-5 min. Re-run `npm run simulate` after changing.
+const GAME_TARGETS = { 2: 100, 3: 180, 4: 245, 5: 310, 6: 375, 7: 445, 8: 520 };
+const goalMinutes = n => [10 + 3 * (n - 2), 15 + 5 * (n - 2)];
+function goalFor(players) {
+  const n = Math.min(MAX_PLAYERS, Math.max(2, players));
+  return { target: GAME_TARGETS[n], minutes: goalMinutes(n) };
+}
 const BOT_NAMES = ['Robo Rita', 'Captain Card', 'Beep Boop', 'Sir Shuffle', 'Wild Wendy', 'Turbo Tim', 'Lucky Lu', 'Professor Plus'];
 const BOT_AVATARS = ['🤖', '👾', '🦾', '🛸', '🎲', '🧠', '🐙', '🦉'];
 
@@ -53,8 +61,10 @@ class Room {
     this.players = [];
     this.hostId = null;
     this.status = 'lobby'; // lobby | playing | roundOver
-    this.settings = { stacking: true, turnSeconds: 20 };
+    this.settings = { stacking: true, turnSeconds: 20, endless: false };
     this.round = 0;
+    this.target = null; // points needed to win this game (null = no limit), fixed when the game starts
+    this.gameNo = 0;
     this.events = [];
     this.eventSeq = 0;
     this.resetTable();
@@ -205,12 +215,14 @@ class Room {
         if (this.status === 'playing') return 'Wait until the round ends.';
         if (typeof a.stacking === 'boolean') this.settings.stacking = a.stacking;
         if (TIMER_CHOICES.includes(Number(a.turnSeconds))) this.settings.turnSeconds = Number(a.turnSeconds);
+        if (typeof a.endless === 'boolean') this.settings.endless = a.endless;
         return null;
       case 'start':
       case 'next':
         if (!host) return 'Only the host can start.';
         if (this.status === 'playing') return 'A round is already going.';
         if (this.players.length < 2) return 'You need at least 2 players. Add a computer player or invite a friend.';
+        if (this.status === 'lobby' || (this.result && this.result.gameOver)) this.newGame();
         this.newRound();
         return null;
       case 'lobby':
@@ -218,6 +230,7 @@ class Room {
         if (this.status !== 'roundOver') return 'Finish the round first.';
         this.status = 'lobby';
         this.round = 0;
+        this.target = null;
         this.resetTable();
         for (const q of this.players) { q.hand = []; q.score = 0; q.calledUno = false; }
         return null;
@@ -228,6 +241,14 @@ class Room {
       case 'catch': return this.catchUno(p, a.target);
       default: return 'Unknown action.';
     }
+  }
+
+  // Scores back to 0; the target depends on how many are playing.
+  newGame() {
+    this.gameNo++;
+    this.round = 0;
+    for (const p of this.players) p.score = 0;
+    this.target = this.settings.endless ? null : GAME_TARGETS[this.players.length];
   }
 
   newRound() {
@@ -443,13 +464,14 @@ class Room {
       pts += p.hand.reduce((s, c) => s + points(c), 0);
     }
     w.score += pts;
+    const gameOver = this.target != null && w.score >= this.target;
     this.status = 'roundOver';
     this.pendingDraw = 0;
     this.pendingType = null;
     this.turnDeadline = null;
     this.unoVulnerable = null;
-    this.result = { winnerId: w.id, points: pts, hands };
-    this.event('win', { pid: w.id, points: pts });
+    this.result = { winnerId: w.id, points: pts, hands, gameOver };
+    this.event('win', { pid: w.id, points: pts, gameOver });
   }
 
   // ---- computer players ----
@@ -498,6 +520,10 @@ class Room {
       round: this.round,
       hostId: this.hostId,
       settings: this.settings,
+      target: this.target,
+      gameNo: this.gameNo,
+      // What a new game would be with this many players (shown in the lobby).
+      goal: goalFor(this.players.length),
       me: forId,
       players: this.players.map(p => ({
         id: p.id, name: p.name, avatar: p.avatar, bot: p.bot, autoBot: p.autoBot, connected: p.connected,
@@ -524,4 +550,4 @@ class Room {
   }
 }
 
-module.exports = { Room, MAX_PLAYERS, LOBBY_DROP_MS, STAND_IN_MS, COLORS, makeDeck, points };
+module.exports = { Room, MAX_PLAYERS, LOBBY_DROP_MS, STAND_IN_MS, GAME_TARGETS, goalFor, COLORS, makeDeck, points };

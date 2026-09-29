@@ -373,6 +373,7 @@
     $('#start').onclick = () => act({ type: 'start' });
     $('#rule-stack').onchange = e => act({ type: 'settings', stacking: e.target.checked });
     $('#rule-timer').onchange = e => act({ type: 'settings', turnSeconds: Number(e.target.value) });
+    $('#rule-length').onchange = e => act({ type: 'settings', endless: e.target.value === 'endless' });
     $('#leave-lobby').onclick = leaveRoom;
     $('#lobby-players').onclick = e => {
       const b = e.target.closest('[data-kick]');
@@ -402,11 +403,19 @@
     $('#add-bot').disabled = s.players.length >= 8;
     $('#rule-stack').checked = s.settings.stacking;
     $('#rule-timer').value = String(s.settings.turnSeconds);
+    $('#rule-length').value = s.settings.endless ? 'endless' : 'goal';
+    // The goal grows with the number of players, so the game stays about as long as promised.
+    const [lo, hi] = s.goal.minutes;
+    const length = s.settings.endless
+      ? 'No limit: keep playing rounds until you stop'
+      : `First to <b>${s.goal.target} points</b> wins · about ${lo}–${hi} min${s.players.length < 2 ? ' with 2 players' : ''}`;
+    $('#length-hint').innerHTML = length;
     const start = $('#start');
     start.disabled = s.players.length < 2;
     start.textContent = s.players.length < 2 ? 'Need 2+ players to start' : `▶ Start game (${s.players.length} players)`;
     $('#guest-info').innerHTML = isHost ? '' : `⏳ Waiting for <b>${esc(host ? host.name : 'the host')}</b> to start the game.<br>
-      Rules: ${s.settings.stacking ? '<b>stacking on</b> (+2 on a +2 = take 4)' : 'no stacking'} · ${s.settings.turnSeconds ? `<b>${s.settings.turnSeconds} second</b> turn timer` : 'no turn timer'}`;
+      Rules: ${s.settings.stacking ? '<b>stacking on</b> (+2 on a +2 = take 4)' : 'no stacking'} · ${s.settings.turnSeconds ? `<b>${s.settings.turnSeconds} second</b> turn timer` : 'no turn timer'}<br>
+      ${length}`;
     shareHint(s.code);
   }
 
@@ -508,6 +517,7 @@
     $('#game').style.setProperty('--cur', HEX[s.color] || '#a78bfa');
     $('#g-code').textContent = s.code;
     $('#g-round').textContent = `Round ${s.round}`;
+    $('#g-goal').innerHTML = s.target ? `🏁 <span class="long">First to </span>${s.target}` : '♾️ <span class="long">No limit</span>';
     $('#g-color').textContent = s.color ? COLOR_NAME[s.color] : '-';
     renderSeats(s);
     renderCenter(s);
@@ -946,14 +956,15 @@
       modal.classList.add('hidden');
       return;
     }
-    if (resultShownFor !== s.round) {
-      resultShownFor = s.round;
+    const key = `${s.gameNo}:${s.round}`;
+    if (resultShownFor !== key) {
+      resultShownFor = key;
       // Let the last card land before the results pop up.
       setTimeout(() => {
         if (state && state.status === 'roundOver') {
           renderResult(state);
           modal.classList.remove('hidden');
-          confetti(state.result.winnerId === state.me ? 220 : 90);
+          confetti(state.result.gameOver ? 320 : state.result.winnerId === state.me ? 220 : 90);
         }
       }, 900);
     } else if (!modal.classList.contains('hidden')) {
@@ -964,22 +975,29 @@
   function renderResult(s) {
     const w = s.players.find(p => p.id === s.result.winnerId);
     const iWon = s.result.winnerId === s.me;
+    const over = s.result.gameOver;
+    const name = w ? w.name : 'Someone';
+    $('.result-card').classList.toggle('champion', over);
     $('#result-avatar').textContent = w ? w.avatar : '🏆';
-    $('#result-title').textContent = iWon ? 'You won the round! 🎉' : `${w ? w.name : 'Someone'} wins round ${s.round}!`;
-    $('#result-points').textContent = `+${s.result.points} points`;
+    $('#result-title').textContent = over
+      ? (iWon ? '👑 You win the game!' : `👑 ${name} wins the game!`)
+      : (iWon ? 'You won the round! 🎉' : `${name} wins round ${s.round}!`);
+    $('#result-points').textContent = over
+      ? `Reached ${s.target} points in ${s.round} round${s.round === 1 ? '' : 's'}`
+      : `+${s.result.points} points${s.target ? ` · first to ${s.target} wins the game` : ''}`;
     $('#scoreboard').innerHTML = s.players.slice().sort((a, b) => b.score - a.score).map((p, i) => {
       const left = s.result.hands[p.id] || [];
-      const note = p.id === s.result.winnerId ? 'Won this round 🏆' : left.length ? `${left.length} card${left.length > 1 ? 's' : ''} left` : '';
+      const note = p.id === s.result.winnerId ? (over ? 'Won the game 👑' : 'Won this round 🏆') : left.length ? `${left.length} card${left.length > 1 ? 's' : ''} left` : '';
       return `<li class="${p.id === s.result.winnerId ? 'win' : ''}">
         <span class="rank">${i + 1}</span><span class="av">${esc(p.avatar)}</span>
         <span class="nm">${esc(p.name)}${p.id === s.me ? ' (you)' : ''}<small>${note}</small>
           ${left.length ? `<span class="left">${left.map(c => cardHTML(c)).join('')}</span>` : ''}</span>
-        <span class="pts">${p.score} pts</span></li>`;
+        <span class="pts">${p.score}${s.target ? `<small> / ${s.target}</small>` : ' pts'}</span></li>`;
     }).join('');
     const host = s.players.find(p => p.id === s.hostId);
     $('#result-actions').innerHTML = s.hostId === s.me
-      ? '<button class="btn big primary" data-act="next">▶ Next round</button><button class="btn ghost" data-act="lobby">Back to lobby (resets scores)</button>'
-      : `<p class="hint">⏳ Waiting for ${esc(host ? host.name : 'the host')} to start the next round…</p><button class="btn ghost" data-act="leave">Leave room</button>`;
+      ? `<button class="btn big primary" data-act="next">${over ? '🔁 New game' : '▶ Next round'}</button><button class="btn ghost" data-act="lobby">Back to lobby${over ? '' : ' (resets scores)'}</button>`
+      : `<p class="hint">⏳ Waiting for ${esc(host ? host.name : 'the host')} to start ${over ? 'a new game' : 'the next round'}…</p><button class="btn ghost" data-act="leave">Leave room</button>`;
   }
 
   function confetti(count) {
