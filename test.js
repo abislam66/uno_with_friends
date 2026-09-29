@@ -1,7 +1,7 @@
 'use strict';
 // Rule checks + hundreds of simulated bot games. Run: npm test
 const assert = require('assert');
-const { Room } = require('./uno');
+const { Room, LOBBY_DROP_MS, STAND_IN_MS } = require('./uno');
 
 let passed = 0;
 function test(name, fn) {
@@ -176,6 +176,62 @@ test('winning adds up the points left in other hands', () => {
   assert.strictEqual(r.status, 'roundOver');
   assert.strictEqual(r.result.points, 7 + 50 + 20);
   assert.strictEqual(a.score, 77);
+});
+
+console.log('\nLeaving and coming back');
+
+const online = r => { for (const p of r.players) p.connected = true; return r; };
+
+test('closing the browser in the lobby: removed after 30 seconds', () => {
+  const r = new Room('TEST');
+  r.addPlayer({ name: 'A', avatar: '😎' });
+  const b = r.addPlayer({ name: 'B', avatar: '😎' });
+  online(r);
+  r.disconnect(b);
+  assert.strictEqual(r.sweepAway(Date.now() + 10000), false, 'not right away');
+  assert.strictEqual(r.sweepAway(Date.now() + LOBBY_DROP_MS + 1000), true);
+  assert.deepStrictEqual(r.players.map(p => p.name), ['A']);
+});
+
+test('closing the browser mid-game: a computer stands in, and rejoining takes the seat back', () => {
+  const r = online(room(3));
+  const b = r.players[1];
+  const hand = b.hand.slice();
+  b.score = 40;
+  r.disconnect(b);
+  assert.strictEqual(r.sweepAway(Date.now() + 5000), false, 'not right away');
+  assert.strictEqual(r.sweepAway(Date.now() + STAND_IN_MS + 1000), true);
+  assert.ok(b.bot && b.autoBot, 'computer is playing for them');
+  assert.ok(r.byToken(b.token) === b, 'their saved seat still works');
+  r.reconnect(b);
+  assert.ok(!b.bot && !b.autoBot && b.connected, 'back in control');
+  assert.deepStrictEqual(b.hand, hand, 'same cards');
+  assert.strictEqual(b.score, 40, 'same score');
+});
+
+test('stand-in computers play legal moves until the owner returns', () => {
+  const r = online(room(3));
+  const b = r.players[1];
+  r.disconnect(b);
+  r.sweepAway(Date.now() + STAND_IN_MS + 1000);
+  r.turn = 1;
+  for (const a of r.botMoves(b)) assert.strictEqual(r.act(b, a), null);
+});
+
+test('a host who stays away hands the host role to someone still here', () => {
+  const r = online(room(3));
+  const [a, b] = r.players;
+  r.disconnect(a);
+  r.sweepAway(Date.now() + STAND_IN_MS + 1000);
+  assert.strictEqual(r.hostId, b.id);
+});
+
+test('pressing Leave gives the seat away for good', () => {
+  const r = online(room(2));
+  const a = r.players[0];
+  const token = a.token;
+  r.replaceWithBot(a);
+  assert.strictEqual(r.byToken(token), undefined);
 });
 
 console.log('\nSimulated games');

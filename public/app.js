@@ -37,6 +37,33 @@
   let turnEndsAt = 0;
   let lanUrl = null;
   let inviteLink = '';
+  let welcomeBack = false;
+  let seatTouched = 0;
+  let rejoinSeat = null;
+
+  // Seats are also kept in localStorage (survives closing the browser) so people can rejoin.
+  // The per-tab session above still decides which seat a tab is in, so a second tab can be a second player.
+  const SEAT_TTL = 12 * 60 * 60 * 1000;
+  function loadSeats() {
+    const seats = load(localStorage, 'uno:seats', {});
+    return seats && typeof seats === 'object' ? seats : {};
+  }
+  function rememberSeat(s) {
+    const seats = loadSeats();
+    seats[s.code] = { code: s.code, token: s.token, id: s.id, at: Date.now() };
+    const recent = Object.values(seats).sort((a, b) => b.at - a.at).slice(0, 5);
+    save(localStorage, 'uno:seats', Object.fromEntries(recent.map(x => [x.code, x])));
+  }
+  function forgetSeat(code) {
+    const seats = loadSeats();
+    delete seats[code];
+    save(localStorage, 'uno:seats', seats);
+  }
+  function savedSeat(code) {
+    const seats = loadSeats();
+    if (code) return seats[code] || null;
+    return Object.values(seats).filter(s => Date.now() - s.at < SEAT_TTL).sort((a, b) => b.at - a.at)[0] || null;
+  }
 
   // ---------- sound (tiny synth, no files) ----------
   const Sound = (() => {
@@ -91,7 +118,7 @@
   async function post(path, body) {
     const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+    if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: res.status });
     return data;
   }
   async function act(a) {
@@ -158,6 +185,15 @@
     }
     $('#create').onclick = () => enter('create');
     $('#join').onclick = () => enter('join');
+    $('#rejoin-btn').onclick = () => { if (rejoinSeat) startSession(rejoinSeat, true); };
+    $('#rejoin-leave').onclick = async () => {
+      const seat = rejoinSeat;
+      $('#rejoin').classList.add('hidden');
+      rejoinSeat = null;
+      if (!seat) return;
+      forgetSeat(seat.code);
+      try { await post('/api/leave', { code: seat.code, token: seat.token }); } catch { /* ignore */ }
+    };
     $('#code').addEventListener('input', e => {
       e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
       $('#join').textContent = 'Join';
@@ -223,11 +259,39 @@
     }
   }
 
-  function startSession(data) {
+  function startSession(data, rejoining = false) {
     session = { code: data.code, token: data.token, id: data.id };
     save(sessionStorage, 'uno:session', session);
+    rememberSeat(session);
+    seatTouched = Date.now();
+    welcomeBack = rejoining;
     history.replaceState(null, '', '?room=' + data.code);
     connect();
+  }
+
+  // On the start screen: "You're still in game ABCD" if a saved seat is still at the table.
+  async function offerRejoin(code) {
+    const box = $('#rejoin');
+    box.classList.add('hidden');
+    const seat = savedSeat(code);
+    if (!seat) return;
+    let info;
+    try {
+      info = await post('/api/seat', { code: seat.code, token: seat.token });
+    } catch (e) {
+      if (e.status === 403 || e.status === 404) forgetSeat(seat.code); // that game is over
+      return;
+    }
+    if (session) return; // joined something else in the meantime
+    rejoinSeat = seat;
+    const where = info.status === 'playing'
+      ? `Round ${info.round} is still going. You have ${info.cards} card${info.cards === 1 ? '' : 's'}.`
+      : info.status === 'roundOver' ? `Round ${info.round} just ended. You have ${info.score} points.` : 'Your friends are waiting in the lobby.';
+    $('#rejoin-avatar').textContent = info.avatar;
+    $('#rejoin-title').textContent = `${info.name}, you're still in game ${seat.code}!`;
+    $('#rejoin-sub').textContent = where;
+    $('#rejoin-btn').textContent = `↩ Rejoin game ${seat.code}`;
+    box.classList.remove('hidden');
   }
 
   function connect() {
@@ -238,7 +302,10 @@
     resultShownFor = null;
     es = new EventSource(`/events?code=${encodeURIComponent(session.code)}&token=${encodeURIComponent(session.token)}`);
     es.onmessage = e => onState(JSON.parse(e.data));
-    es.addEventListener('gone', () => goHome(state ? 'That room has closed.' : ''));
+    es.addEventListener('gone', () => {
+      if (session) forgetSeat(session.code);
+      goHome(state ? 'That room has closed.' : '');
+    });
     es.addEventListener('react', e => showReaction(JSON.parse(e.data)));
   }
 
@@ -253,6 +320,7 @@
     closeColor(null);
     flashTitle(false);
     show('home');
+    $('#rejoin').classList.add('hidden');
     $('#home-error').textContent = msg || '';
   }
 
@@ -260,7 +328,9 @@
     if (state && state.status === 'playing' && !confirm('Leave the game? A computer player will take your seat.')) return;
     const s = session;
     goHome('');
-    if (s) try { await post('/api/leave', { code: s.code, token: s.token }); } catch { /* ignore */ }
+    if (!s) return;
+    forgetSeat(s.code);
+    try { await post('/api/leave', { code: s.code, token: s.token }); } catch { /* ignore */ }
   }
 
   // ---------- state updates ----------
@@ -269,6 +339,14 @@
     const fresh = lastEventId === null;
     const newEvents = fresh ? [] : s.events.filter(e => e.id > lastEventId).slice(-8);
     lastEventId = s.events.length ? s.events[s.events.length - 1].id : lastEventId || 0;
+    if (fresh && welcomeBack) {
+      welcomeBack = false;
+      setTimeout(() => toast('🎉 Welcome back! You have your seat again', 'good'), 300);
+    }
+    if (session && Date.now() - seatTouched > 60000) {
+      seatTouched = Date.now();
+      rememberSeat(session);
+    }
 
     // Measure where played cards come from before the DOM changes.
     const origins = {};
@@ -308,7 +386,11 @@
     $('#lobby-code').textContent = s.code;
     $('#player-count').textContent = `(${s.players.length}/8)`;
     let html = s.players.map(p => {
-      const tags = [p.id === s.hostId && '👑 Host', p.bot && '🤖 Computer', !p.connected && '💤 Reconnecting…'].filter(Boolean).join(' · ') || '✅ Ready';
+      const tags = [
+        p.id === s.hostId && '👑 Host',
+        p.autoBot ? '🤖 Computer playing for them' : p.bot && '🤖 Computer',
+        !p.connected && !p.autoBot && '💤 Reconnecting…',
+      ].filter(Boolean).join(' · ') || '✅ Ready';
       return `<li><span class="av">${esc(p.avatar)}</span>
         <span class="nm">${esc(p.name)}${p.id === s.me ? ' (you)' : ''}<small>${tags}</small></span>
         ${isHost && p.id !== s.me ? `<button class="kick" data-kick="${p.id}" aria-label="Remove ${esc(p.name)}">✕</button>` : ''}</li>`;
@@ -452,7 +534,7 @@
         <div class="mini-hand">${cardHTML(null).repeat(Math.min(p.count, 10))}</div>
         <div class="avatar-wrap">${badge}<div class="avatar">${esc(p.avatar)}</div>${ring}<span class="count" title="${p.count} cards">${p.count}</span></div>
         <div class="name">${esc(p.name)}</div>
-        <div class="sub">${p.score} pts${p.bot ? ' · 🤖' : ''}${p.connected ? '' : ' · 💤 away'}</div>
+        <div class="sub">${p.score} pts${p.autoBot ? ' · 🤖 standing in' : p.bot ? ' · 🤖' : p.connected ? '' : ' · 💤 away'}</div>
         ${vulnerable ? `<button class="catch-btn" data-catch="${p.id}" aria-label="Catch ${esc(p.name)} for not calling UNO">Catch! 🫵</button>` : ''}
       </div>`;
     }).join('');
@@ -693,6 +775,12 @@
     switch (e.type) {
       case 'join':
         if (s.status !== 'playing' && !me(e.pid)) { toast(`👋 ${esc(e.name)} joined`); Sound.play('pop'); }
+        break;
+      case 'standIn':
+        toast(`🤖 ${esc(e.name)} has been away a while, so the computer is playing for them. They can rejoin anytime.`);
+        break;
+      case 'back':
+        if (!me(e.pid)) { toast(`🎉 ${esc(e.name)} is back!`, 'good'); Sound.play('pop'); }
         break;
       case 'leave':
         toast(e.bot ? `🚪 ${esc(e.name)} left. A computer player took their seat.` : `🚪 ${esc(e.name)} left`);
@@ -941,10 +1029,11 @@
   initGame();
   const urlRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
   if (session && (!urlRoom || urlRoom === session.code)) {
-    connect(); // rejoin after a refresh
+    connect(); // same tab after a refresh
   } else {
     session = null;
     show('home');
+    offerRejoin(urlRoom); // browser was closed: offer the saved seat (for this invite's room, or the latest game)
   }
   requestAnimationFrame(tick);
 })();

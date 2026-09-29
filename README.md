@@ -27,6 +27,16 @@ The first time you run it, Windows may ask whether Node.js can use the network. 
 
 Testing alone? Open a second browser tab: each tab counts as a separate player.
 
+### Closed the browser by accident?
+
+Your seat is saved in your browser. Open the game again (or the invite link) and tap **↩ Rejoin game**. You get your same cards and score back, even in the middle of a round.
+
+- While you're gone, your turns pass on their own (timer runs out, or the computer plays for you after 15 seconds if the timer is off).
+- If you're gone for more than **1 minute**, a computer player stands in for you so your friends aren't kept waiting. Rejoining takes your seat back from it.
+- If you close the tab while still in the lobby, you're removed after 30 seconds. Just join again.
+- Don't want to go back? Tap **No thanks, leave that game** and the computer keeps your seat for good.
+- If everyone leaves, the game pauses and waits up to 1 hour for someone to come back.
+
 ### Friends somewhere else (not on your Wi-Fi)
 
 School and office Wi-Fi often blocks devices from talking to each other. If friends can't connect:
@@ -56,4 +66,4 @@ School and office Wi-Fi often blocks devices from talking to each other. If frie
 | `public/` | The game screens (`index.html`, `style.css`, `app.js`) |
 | `test.js` | Rule checks + 500 simulated games (`npm test`) |
 
-Games live in memory. Restarting the server ends all rooms.
+Games live in the server's memory. Restarting the server ends all rooms (saved seats then just stop showing up).

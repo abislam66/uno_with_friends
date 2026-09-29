@@ -21,10 +21,9 @@ const TYPES = {
 const REACTIONS = ['😂', '😡', '😱', '🔥', '👏', '😎', '🥶', '💀', '🙏', '🤡'];
 const NO_MOVES_DELAY = 1400;   // pause before drawing for someone with no playable card
 const AWAY_DELAY = 15000;      // with the timer off, how long before an away player is played for
-const LOBBY_DROP_MS = 30000;   // remove players who close the tab in the lobby
-const IDLE_ROOM_MS = 20 * 60 * 1000;
+const IDLE_ROOM_MS = 60 * 60 * 1000; // rooms with nobody connected are kept this long so people can rejoin
 
-const tables = new Map(); // code -> { room, streams: Map<pid, Set<res>>, timers }
+const tables = new Map(); // code -> { room, streams: Map<pid, Set<res>>, timers, emptySince }
 
 // ---------- helpers ----------
 function makeCode() {
@@ -89,7 +88,8 @@ function schedule(t) {
   clearTimeout(t.turnTimer);
   clearTimeout(t.unoTimer);
   t.turnTimer = t.unoTimer = null;
-  if (room.status !== 'playing') return;
+  // Nobody watching: pause the game so it's waiting when people rejoin.
+  if (room.status !== 'playing' || !t.streams.size) return;
   const now = Date.now();
 
   const v = room.unoVulnerable;
@@ -144,10 +144,12 @@ function planBotCatches(t, v) {
   }
 }
 
+// A room is finished once nobody left in it could ever come back.
+const abandoned = room => !room.players.some(p => p.token);
+
 function deleteTable(t) {
   clearTimeout(t.turnTimer);
   clearTimeout(t.unoTimer);
-  for (const timer of t.leaveTimers.values()) clearTimeout(timer);
   for (const set of t.streams.values()) {
     for (const res of set) { res.write('event: gone\ndata: {}\n\n'); res.end(); }
   }
@@ -161,7 +163,8 @@ function leave(t, p) {
   const set = t.streams.get(p.id);
   if (set) for (const res of set) res.end();
   t.streams.delete(p.id);
-  if (!room.humans().length) return deleteTable(t);
+  if (!t.streams.size) t.emptySince = Date.now();
+  if (abandoned(room)) return deleteTable(t);
   broadcast(t);
 }
 
@@ -179,28 +182,23 @@ function openStream(req, res, url) {
     return res.end();
   }
   res.write('retry: 2000\n\n');
+  const { room } = t;
+  const wasEmpty = !t.streams.size;
   let set = t.streams.get(p.id);
   if (!set) t.streams.set(p.id, (set = new Set()));
   set.add(res);
-  clearTimeout(t.leaveTimers.get(p.id));
-  p.connected = true;
+  t.emptySince = null;
+  room.reconnect(p); // also takes the seat back from a stand-in computer
+  if (wasEmpty) room.restartTurnTimer();
   broadcast(t);
 
   req.on('close', () => {
     set.delete(res);
     if (set.size || t.streams.get(p.id) !== set) return;
     t.streams.delete(p.id);
-    const { room } = t;
-    if (!room.players.includes(p) || p.bot || !tables.has(room.code)) return;
-    p.connected = false;
-    if (room.status !== 'playing') {
-      t.leaveTimers.set(p.id, setTimeout(() => {
-        if (p.connected || !room.players.includes(p) || room.status === 'playing') return;
-        room.removePlayer(p.id);
-        if (!room.humans().length) return deleteTable(t);
-        broadcast(t);
-      }, LOBBY_DROP_MS));
-    }
+    if (!t.streams.size) t.emptySince = Date.now();
+    if (!room.players.includes(p) || !tables.has(room.code)) return;
+    room.disconnect(p);
     broadcast(t);
   });
 }
@@ -210,7 +208,7 @@ function api(name, body, res) {
   if (name === 'create') {
     const code = makeCode();
     const room = new Room(code);
-    const t = { room, streams: new Map(), leaveTimers: new Map(), active: Date.now() };
+    const t = { room, streams: new Map(), active: Date.now(), emptySince: Date.now() };
     tables.set(code, t);
     const p = room.addPlayer({ name: cleanName(body.name), avatar: cleanAvatar(body.avatar) });
     return json(res, 200, { code, token: p.token, id: p.id });
@@ -231,6 +229,10 @@ function api(name, body, res) {
   const p = room.byToken(String(body.token || ''));
   if (!p) return json(res, 403, { error: "You're not in this room anymore." });
 
+  // Is a seat saved in someone's browser still here? Used for the "Rejoin" button.
+  if (name === 'seat') {
+    return json(res, 200, { status: room.status, round: room.round, name: p.name, avatar: p.avatar, cards: p.hand.length, score: p.score });
+  }
   if (name === 'leave') {
     leave(t, p);
     return json(res, 200, { ok: true });
@@ -289,8 +291,14 @@ setInterval(() => {
 }, 20000);
 setInterval(() => {
   const now = Date.now();
-  for (const t of [...tables.values()]) if (!t.streams.size && now - t.active > IDLE_ROOM_MS) deleteTable(t);
-}, 60000);
+  for (const t of [...tables.values()]) {
+    if (!t.streams.size && t.emptySince && now - t.emptySince > IDLE_ROOM_MS) deleteTable(t);
+    else if (t.room.sweepAway(now)) {
+      if (abandoned(t.room)) deleteTable(t);
+      else broadcast(t);
+    }
+  }
+}, 5000);
 
 server.on('error', e => {
   if (e.code === 'EADDRINUSE') {

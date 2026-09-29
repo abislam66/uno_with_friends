@@ -7,6 +7,8 @@ const COLORS = ['red', 'yellow', 'green', 'blue'];
 const HAND_SIZE = 7;
 const MAX_PLAYERS = 8;
 const UNO_WINDOW_MS = 4000;          // how long others can "Catch!" someone who forgot to call UNO
+const LOBBY_DROP_MS = 30000;         // in the lobby, players who close the tab are removed after this
+const STAND_IN_MS = 60000;           // in a game, a computer plays for anyone gone this long (until they rejoin)
 const TIMER_CHOICES = [0, 10, 15, 20, 30];
 const BOT_NAMES = ['Robo Rita', 'Captain Card', 'Beep Boop', 'Sir Shuffle', 'Wild Wendy', 'Turbo Tim', 'Lucky Lu', 'Professor Plus'];
 const BOT_AVATARS = ['🤖', '👾', '🦾', '🛸', '🎲', '🧠', '🐙', '🦉'];
@@ -93,6 +95,8 @@ class Room {
       token: bot ? null : crypto.randomBytes(16).toString('hex'),
       name, avatar, bot,
       connected: bot,
+      goneSince: null,   // when a person's last connection closed
+      autoBot: false,    // a computer is standing in until this person rejoins
       hand: [], score: 0, calledUno: false,
     };
     this.players.push(p);
@@ -118,15 +122,64 @@ class Room {
   // Mid-round a leaving player is replaced by a bot so the round can finish.
   replaceWithBot(p) {
     p.bot = true;
+    p.autoBot = false;
     p.token = null;
     p.connected = true;
+    p.goneSince = null;
     this.event('leave', { name: p.name, bot: true });
     if (this.hostId === p.id) this.passHost();
   }
 
   passHost() {
-    const h = this.humans()[0];
+    const h = this.humans().find(p => p.connected) || this.humans()[0];
     this.hostId = h ? h.id : null;
+  }
+
+  // ---- closing the browser and coming back ----
+  disconnect(p) {
+    if (p.bot) return;
+    p.connected = false;
+    p.goneSince = Date.now();
+  }
+
+  reconnect(p) {
+    if (p.autoBot) {
+      p.bot = false;
+      p.autoBot = false;
+      this.event('back', { pid: p.id, name: p.name });
+    }
+    p.connected = true;
+    p.goneSince = null;
+    if (!this.player(this.hostId) || this.player(this.hostId).bot) this.hostId = p.id;
+  }
+
+  // Lobby: drop people who left. Game: let a computer stand in for them. Returns true if anything changed.
+  sweepAway(now = Date.now()) {
+    let changed = false;
+    for (const p of [...this.players]) {
+      if (p.connected || !p.goneSince) continue;
+      const gone = now - p.goneSince;
+      if (this.status === 'lobby') {
+        if (gone > LOBBY_DROP_MS) {
+          this.removePlayer(p.id);
+          changed = true;
+        }
+      } else if (!p.bot && gone > STAND_IN_MS) {
+        p.bot = true;
+        p.autoBot = true;
+        this.event('standIn', { pid: p.id, name: p.name });
+        if (this.hostId === p.id) this.passHost();
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  // Fresh turn clock, used when people come back to a room that was paused with nobody in it.
+  restartTurnTimer() {
+    if (this.status !== 'playing' || !this.settings.turnSeconds) return;
+    this.turnStarted = Date.now();
+    this.turnDeadline = this.turnStarted + this.settings.turnSeconds * 1000;
   }
 
   // ---- actions: return an error message, or null when it worked ----
@@ -447,7 +500,7 @@ class Room {
       settings: this.settings,
       me: forId,
       players: this.players.map(p => ({
-        id: p.id, name: p.name, avatar: p.avatar, bot: p.bot, connected: p.connected,
+        id: p.id, name: p.name, avatar: p.avatar, bot: p.bot, autoBot: p.autoBot, connected: p.connected,
         count: p.hand.length, score: p.score, calledUno: p.calledUno,
       })),
       hand: me ? me.hand : [],
@@ -471,4 +524,4 @@ class Room {
   }
 }
 
-module.exports = { Room, MAX_PLAYERS, COLORS, makeDeck, points };
+module.exports = { Room, MAX_PLAYERS, LOBBY_DROP_MS, STAND_IN_MS, COLORS, makeDeck, points };

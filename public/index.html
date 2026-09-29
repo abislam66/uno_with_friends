@@ -22,6 +22,16 @@
       </div>
       <p class="tagline">Play UNO with your friends in the browser. No sign-up needed.</p>
 
+      <div id="rejoin" class="rejoin hidden" role="region" aria-labelledby="rejoin-title">
+        <span class="rejoin-avatar" id="rejoin-avatar" aria-hidden="true"></span>
+        <div class="rejoin-text">
+          <b id="rejoin-title">You're still in a game!</b>
+          <small id="rejoin-sub"></small>
+        </div>
+        <button id="rejoin-btn" class="btn big rejoin-btn">↩ Rejoin game</button>
+        <button id="rejoin-leave" class="btn ghost rejoin-leave">No thanks, leave that game</button>
+      </div>
+
       <label class="field">
         <span class="label">Your name</span>
         <input id="name" maxlength="16" placeholder="Type your name" autocomplete="nickname">
